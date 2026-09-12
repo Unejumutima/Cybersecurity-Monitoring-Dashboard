@@ -1,16 +1,29 @@
 import { Bars3Icon, BellIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { ShieldExclamationIcon } from '@heroicons/react/24/solid';
+import type { WsStatus } from '../../hooks/useWebSocket';
 
 interface HeaderProps {
   onMenuClick: () => void;
-  /** Number of unacknowledged alerts */
-  alertCount: number;
+  alertCount:  number;
+  wsStatus:    WsStatus;
+  onReconnect: () => void;
 }
 
-export default function Header({ onMenuClick, alertCount }: HeaderProps) {
+// Label + colour per connection state
+const WS_STATUS_CONFIG: Record<WsStatus, { label: string; dot: string; text: string }> = {
+  connected:    { label: 'Connected',    dot: 'bg-emerald-500',              text: 'text-emerald-400' },
+  connecting:   { label: 'Connecting…',  dot: 'bg-yellow-500 animate-pulse', text: 'text-yellow-400' },
+  reconnecting: { label: 'Reconnecting…',dot: 'bg-orange-500 animate-pulse', text: 'text-orange-400' },
+  disconnected: { label: 'Disconnected', dot: 'bg-red-500',                  text: 'text-red-400'    },
+};
+
+export default function Header({ onMenuClick, alertCount, wsStatus, onReconnect }: HeaderProps) {
+  const wsCfg = WS_STATUS_CONFIG[wsStatus];
+
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-4 px-4 py-3 bg-[#0a0e1a]/90 backdrop-blur border-b border-slate-800">
-      {/* Left — hamburger + page context */}
+
+      {/* Left — hamburger + threat level */}
       <div className="flex items-center gap-3">
         <button
           onClick={onMenuClick}
@@ -28,9 +41,27 @@ export default function Header({ onMenuClick, alertCount }: HeaderProps) {
         </div>
       </div>
 
-      {/* Right — search + notifications + user */}
+      {/* Right — WS status + search + bell + user */}
       <div className="flex items-center gap-2">
-        {/* Search */}
+
+        {/* WebSocket connection status */}
+        <button
+          onClick={wsStatus === 'disconnected' ? onReconnect : undefined}
+          title={wsStatus === 'disconnected' ? 'Click to reconnect' : `WebSocket: ${wsCfg.label}`}
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors
+            ${wsStatus === 'connected'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              : wsStatus === 'disconnected'
+              ? 'bg-red-500/10 border-red-500/20 text-red-400 cursor-pointer hover:bg-red-500/20'
+              : 'bg-slate-800/60 border-slate-700 text-slate-400'
+            }`}
+          aria-label={`WebSocket status: ${wsCfg.label}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${wsCfg.dot}`} aria-hidden="true" />
+          <span className={wsCfg.text}>{wsCfg.label}</span>
+        </button>
+
+        {/* Search box */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 text-sm">
           <MagnifyingGlassIcon className="w-4 h-4 shrink-0" />
           <span className="text-slate-600 text-xs">Search events…</span>

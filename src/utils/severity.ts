@@ -60,7 +60,7 @@ export function formatTimestamp(iso: string): string {
 }
 
 export function formatRelativeTime(iso: string): string {
-  const now  = new Date('2024-11-14T04:00:00Z'); // fixed "now" matching mock data
+  const now  = new Date(); // real current time
   const then = new Date(iso);
   const diffMs  = now.getTime() - then.getTime();
   const diffMin = Math.floor(diffMs / 60000);
