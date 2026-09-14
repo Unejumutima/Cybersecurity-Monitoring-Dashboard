@@ -128,12 +128,14 @@ const EVENT_TEMPLATES: EventTemplate[] = [
   {
     eventType: 'port_scan',
     severity: 'medium',
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     messageTemplate: (src, _ep) =>
       `Port scan detected from ${src} — SYN scan across TCP ports 22, 80, 443, 3389, 445 on internal subnet`,
   },
   {
     eventType: 'port_scan',
     severity: 'high',
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     messageTemplate: (src, _ep) =>
       `Aggressive network scan from ${src} — 8,000+ hosts probed in under 4 minutes; likely automated scanner`,
   },

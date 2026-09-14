@@ -4,6 +4,7 @@ import DashboardRoute        from './routes/DashboardRoute';
 import SecurityEventsRoute   from './routes/SecurityEventsRoute';
 import AnalyticsRoute        from './routes/AnalyticsRoute';
 import VulnerabilitiesRoute  from './routes/VulnerabilitiesRoute';
+import OWASPRoute            from './routes/OWASPRoute';
 import PlaceholderPage       from './pages/PlaceholderPage';
 
 export default function App() {
@@ -16,15 +17,7 @@ export default function App() {
           <Route path="analytics"       element={<AnalyticsRoute />} />
           <Route path="vulnerabilities" element={<VulnerabilitiesRoute />} />
 
-          <Route
-            path="owasp"
-            element={
-              <PlaceholderPage
-                title="OWASP Top 10"
-                description="Compliance posture per OWASP category with finding counts and trend tracking. Coming in Phase 4."
-              />
-            }
-          />
+          <Route path="owasp" element={<OWASPRoute />} />
           <Route
             path="reports"
             element={

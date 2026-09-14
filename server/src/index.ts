@@ -25,6 +25,7 @@ import cors from 'cors';
 import { createWsServer } from './wsServer';
 import { startEventGenerator } from './eventGenerator';
 import vulnerabilitiesRouter from './routes/vulnerabilities';
+import owaspRouter           from './routes/owasp';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
 
@@ -36,6 +37,7 @@ app.use(express.json());
 
 // ── REST routes ───────────────────────────────────────────────────────────────
 app.use('/api/vulnerabilities', vulnerabilitiesRouter);
+app.use('/api/owasp',           owaspRouter);
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -50,10 +52,11 @@ app.get('/info', (_req, res) => {
   res.json({
     name:    'Cybersecurity Monitoring Dashboard — Backend',
     version: '1.0.0',
-    phase:   3,
+    phase:   4,
     ws:      `ws://localhost:${PORT}`,
     rest: {
       vulnerabilities: `http://localhost:${PORT}/api/vulnerabilities`,
+      owasp:           `http://localhost:${PORT}/api/owasp`,
       health:          `http://localhost:${PORT}/health`,
     },
     note: 'All data is SIMULATED/MOCK for demonstration purposes only.',
