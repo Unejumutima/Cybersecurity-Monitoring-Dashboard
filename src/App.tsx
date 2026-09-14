@@ -5,7 +5,7 @@ import SecurityEventsRoute   from './routes/SecurityEventsRoute';
 import AnalyticsRoute        from './routes/AnalyticsRoute';
 import VulnerabilitiesRoute  from './routes/VulnerabilitiesRoute';
 import OWASPRoute            from './routes/OWASPRoute';
-import PlaceholderPage       from './pages/PlaceholderPage';
+import ReportsRoute          from './routes/ReportsRoute';
 
 export default function App() {
   return (
@@ -18,15 +18,7 @@ export default function App() {
           <Route path="vulnerabilities" element={<VulnerabilitiesRoute />} />
 
           <Route path="owasp" element={<OWASPRoute />} />
-          <Route
-            path="reports"
-            element={
-              <PlaceholderPage
-                title="Reports"
-                description="Exportable PDF security reports, executive summaries, and scheduled delivery. Coming in Phase 5."
-              />
-            }
-          />
+          <Route path="reports" element={<ReportsRoute />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

@@ -11,6 +11,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { query, param, validationResult } from 'express-validator';
 import { mockVulnerabilities } from '../data/vulnerabilities';
 import type {
   VulnSeverity,
@@ -39,39 +40,67 @@ function buildBySeverity(vulns: typeof mockVulnerabilities): Record<VulnSeverity
 
 // ── GET /api/vulnerabilities ──────────────────────────────────────────────────
 
-router.get('/', (req: Request, res: Response) => {
-  const { severity, status } = req.query;
+const validSeverities = ['critical', 'high', 'medium', 'low', 'informational'];
+const validStatuses = ['open', 'in_remediation', 'resolved', 'accepted_risk'];
 
-  let results = [...mockVulnerabilities];
+router.get(
+  '/',
+  // Validation middleware
+  query('severity')
+    .optional()
+    .custom((value) => {
+      const severities = value.split(',').map((s: string) => s.trim());
+      return severities.every((s: string) => validSeverities.includes(s));
+    })
+    .withMessage('Invalid severity value'),
+  query('status')
+    .optional()
+    .custom((value) => {
+      const statuses = value.split(',').map((s: string) => s.trim());
+      return statuses.every((s: string) => validStatuses.includes(s));
+    })
+    .withMessage('Invalid status value'),
+  (req: Request, res: Response) => {
+    // Check validation results
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array(), note: DEMO_NOTE });
+      return;
+    }
 
-  if (severity && typeof severity === 'string') {
-    const severities = severity.split(',').map((s) => s.trim()) as VulnSeverity[];
-    results = results.filter((v) => severities.includes(v.severity));
+    const { severity, status } = req.query;
+
+    let results = [...mockVulnerabilities];
+
+    if (severity && typeof severity === 'string') {
+      const severities = severity.split(',').map((s) => s.trim()) as VulnSeverity[];
+      results = results.filter((v) => severities.includes(v.severity));
+    }
+
+    if (status && typeof status === 'string') {
+      const statuses = status.split(',').map((s) => s.trim()) as VulnStatus[];
+      results = results.filter((v) => statuses.includes(v.status));
+    }
+
+    // Always sort: critical first, then by CVSS score descending
+    const severityOrder: Record<VulnSeverity, number> = {
+      critical: 0, high: 1, medium: 2, low: 3, informational: 4,
+    };
+    results.sort((a, b) => {
+      const sevDiff = severityOrder[a.severity] - severityOrder[b.severity];
+      return sevDiff !== 0 ? sevDiff : b.cvssScore - a.cvssScore;
+    });
+
+    const body: VulnerabilitiesResponse = {
+      data:       results,
+      total:      results.length,
+      bySeverity: buildBySeverity(results),
+      note:       DEMO_NOTE,
+    };
+
+    res.json(body);
   }
-
-  if (status && typeof status === 'string') {
-    const statuses = status.split(',').map((s) => s.trim()) as VulnStatus[];
-    results = results.filter((v) => statuses.includes(v.status));
-  }
-
-  // Always sort: critical first, then by CVSS score descending
-  const severityOrder: Record<VulnSeverity, number> = {
-    critical: 0, high: 1, medium: 2, low: 3, informational: 4,
-  };
-  results.sort((a, b) => {
-    const sevDiff = severityOrder[a.severity] - severityOrder[b.severity];
-    return sevDiff !== 0 ? sevDiff : b.cvssScore - a.cvssScore;
-  });
-
-  const body: VulnerabilitiesResponse = {
-    data:       results,
-    total:      results.length,
-    bySeverity: buildBySeverity(results),
-    note:       DEMO_NOTE,
-  };
-
-  res.json(body);
-});
+);
 
 // ── GET /api/vulnerabilities/summary ─────────────────────────────────────────
 
@@ -91,16 +120,31 @@ router.get('/summary', (_req: Request, res: Response) => {
 
 // ── GET /api/vulnerabilities/:id ──────────────────────────────────────────────
 
-router.get('/:id', (req: Request, res: Response) => {
-  const vuln = mockVulnerabilities.find((v) => v.id === req.params.id);
+router.get(
+  '/:id',
+  // Validation middleware
+  param('id')
+    .trim()
+    .matches(/^VULN-\d{4}$/)
+    .withMessage('Invalid vulnerability ID format. Expected format: VULN-0001'),
+  (req: Request, res: Response) => {
+    // Check validation results
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array(), note: DEMO_NOTE });
+      return;
+    }
 
-  if (!vuln) {
-    res.status(404).json({ error: `Vulnerability ${req.params.id} not found`, note: DEMO_NOTE });
-    return;
+    const vuln = mockVulnerabilities.find((v) => v.id === req.params.id);
+
+    if (!vuln) {
+      res.status(404).json({ error: `Vulnerability ${req.params.id} not found`, note: DEMO_NOTE });
+      return;
+    }
+
+    const body: VulnerabilityDetailResponse = { data: vuln, note: DEMO_NOTE };
+    res.json(body);
   }
-
-  const body: VulnerabilityDetailResponse = { data: vuln, note: DEMO_NOTE };
-  res.json(body);
-});
+);
 
 export default router;

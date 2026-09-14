@@ -15,6 +15,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { param, validationResult } from 'express-validator';
 import { mockVulnerabilities } from '../data/vulnerabilities';
 import { computeOWASPCategories, computeOverallScore, scoreToPostureBand } from '../owasp/scoringEngine';
 import type { OWASPResponse, OWASPCategoryResponse, PostureBand } from '../types/owasp';
@@ -50,21 +51,35 @@ router.get('/', (_req: Request, res: Response) => {
 
 // ── GET /api/owasp/:id ────────────────────────────────────────────────────────
 
-router.get('/:id', (req: Request, res: Response) => {
-  const categories = computeOWASPCategories(mockVulnerabilities);
-  // URL-decode in case colons were encoded (e.g. A01%3A2021)
-  const requestedId = decodeURIComponent(req.params.id);
-  const category    = categories.find((c) => c.id === requestedId);
+router.get(
+  '/:id',
+  // Validation middleware
+  param('id')
+    .trim()
+    .matches(/^A\d{2}:2021$/)
+    .withMessage('Invalid OWASP ID format. Expected format: A01:2021'),
+  (req: Request, res: Response) => {
+    // Check validation results
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array(), note: DEMO_NOTE });
+      return;
+    }
 
-  if (!category) {
-    res
-      .status(404)
-      .json({ error: `OWASP category '${requestedId}' not found`, note: DEMO_NOTE });
-    return;
+    const categories = computeOWASPCategories(mockVulnerabilities);
+    const requestedId = req.params.id;
+    const category    = categories.find((c) => c.id === requestedId);
+
+    if (!category) {
+      res
+        .status(404)
+        .json({ error: `OWASP category '${requestedId}' not found`, note: DEMO_NOTE });
+      return;
+    }
+
+    const body: OWASPCategoryResponse = { category, note: DEMO_NOTE };
+    res.json(body);
   }
-
-  const body: OWASPCategoryResponse = { category, note: DEMO_NOTE };
-  res.json(body);
-});
+);
 
 export default router;
