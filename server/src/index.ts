@@ -24,16 +24,20 @@ import express from 'express';
 import cors from 'cors';
 import { createWsServer } from './wsServer';
 import { startEventGenerator } from './eventGenerator';
+import vulnerabilitiesRouter from './routes/vulnerabilities';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
 
 // ── Express app ───────────────────────────────────────────────────────────────
 const app = express();
 
-app.use(cors({ origin: '*' })); // Allow the Vite dev server (port 5173)
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Health check — lets you verify the server is running without a WS client
+// ── REST routes ───────────────────────────────────────────────────────────────
+app.use('/api/vulnerabilities', vulnerabilitiesRouter);
+
+// Health check
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -42,14 +46,17 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Info endpoint — handy during development
 app.get('/info', (_req, res) => {
   res.json({
     name:    'Cybersecurity Monitoring Dashboard — Backend',
     version: '1.0.0',
-    phase:   2,
+    phase:   3,
     ws:      `ws://localhost:${PORT}`,
-    note:    'Events are SIMULATED for demonstration purposes only.',
+    rest: {
+      vulnerabilities: `http://localhost:${PORT}/api/vulnerabilities`,
+      health:          `http://localhost:${PORT}/health`,
+    },
+    note: 'All data is SIMULATED/MOCK for demonstration purposes only.',
   });
 });
 

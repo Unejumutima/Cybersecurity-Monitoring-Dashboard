@@ -4,6 +4,7 @@ import {
   Squares2X2Icon,
   BoltIcon,
   BugAntIcon,
+  ChartBarIcon,
   ListBulletIcon,
   DocumentChartBarIcon,
   XMarkIcon,
@@ -23,6 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Dashboard',        to: '/',                icon: Squares2X2Icon       },
   { label: 'Security Events',  to: '/security-events', icon: BoltIcon             },
+  { label: 'Analytics',        to: '/analytics',       icon: ChartBarIcon         },
   { label: 'Vulnerabilities',  to: '/vulnerabilities', icon: BugAntIcon           },
   { label: 'OWASP Top 10',     to: '/owasp',           icon: ListBulletIcon       },
   { label: 'Reports',          to: '/reports',         icon: DocumentChartBarIcon },

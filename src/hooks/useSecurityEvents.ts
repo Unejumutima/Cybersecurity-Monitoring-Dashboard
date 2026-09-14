@@ -2,24 +2,21 @@
  * useSecurityEvents.ts
  * --------------------
  * Consumes the WebSocket stream and maintains all derived state:
- *   - Live event list  (capped at MAX_EVENTS to prevent memory growth)
- *   - KPI metrics      (total events, critical count, open vuln count, OWASP score)
- *   - Trend data       (rolling per-day severity buckets for the line chart)
- *   - Severity dist    (snapshot counts for the doughnut chart)
- *   - Alert list       (critical + high events become alerts)
- *
- * Separation of concerns:
- *   useWebSocket  →  raw bytes in/out
- *   useSecurityEvents  →  parse + derive state from those bytes
+ *   - Live event list        (capped at MAX_EVENTS)
+ *   - KPI metrics
+ *   - Trend data             (rolling per-day severity buckets)
+ *   - Severity distribution  (doughnut chart)
+ *   - Attack-type counts     (bar chart)
+ *   - Top targeted endpoints (horizontal bar chart)
+ *   - Top source IPs         (horizontal bar chart)
+ *   - Alert count
  */
 
 import { useState, useCallback, useRef } from 'react';
 import { useWebSocket, type WsStatus } from './useWebSocket';
 import type { TrendDataPoint, SeverityDistribution, SecurityMetric } from '../types/security';
 
-// ─── Types mirroring the backend's LiveSecurityEvent ─────────────────────────
-// We duplicate just enough here to avoid a cross-package import.
-// These must stay in sync with server/src/types/liveEvent.ts.
+// ─── Types (mirror server/src/types/liveEvent.ts) ─────────────────────────────
 
 export type LiveSeverity =
   | 'critical' | 'high' | 'medium' | 'low' | 'informational';
@@ -40,32 +37,47 @@ export interface LiveSecurityEvent {
   status:    'open' | 'investigating' | 'resolved';
 }
 
+/** One bar in the attack-type / endpoint / source charts */
+export interface CountedItem {
+  label: string;
+  count: number;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Maximum events kept in memory. Oldest are dropped when exceeded. */
-const MAX_EVENTS = 200;
-
-/** Alerts are generated from critical/high events; keep the last N. */
-const MAX_ALERTS = 20;
+const MAX_EVENTS    = 200;
+const MAX_ALERTS    = 20;
+const TOP_N         = 8;   // how many items to keep in top-N lists
 
 const ALL_SEVERITIES: LiveSeverity[] = [
   'critical', 'high', 'medium', 'low', 'informational',
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+export const EVENT_TYPE_LABELS: Record<LiveEventType, string> = {
+  failed_auth:         'Failed Auth',
+  brute_force:         'Brute Force',
+  sql_injection:       'SQL Injection',
+  xss_attempt:         'XSS Attempt',
+  suspicious_api:      'Suspicious API',
+  port_scan:           'Port Scan',
+  unauthorized_access: 'Unauth Access',
+  malware_alert:       'Malware Alert',
+  data_exfiltration:   'Data Exfiltration',
+  privilege_escalation:'Priv Escalation',
+};
+
+// ─── Pure derivation helpers ──────────────────────────────────────────────────
 
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  return new Date().toISOString().slice(0, 10);
 }
 
 function emptyTotals() {
   return { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
 }
 
-function buildDistribution(
-  events: LiveSecurityEvent[],
-): SeverityDistribution[] {
-  const total = events.length || 1; // avoid div/0
+function buildDistribution(events: LiveSecurityEvent[]): SeverityDistribution[] {
+  const total = events.length || 1;
   const counts = emptyTotals();
   for (const e of events) counts[e.severity]++;
   return ALL_SEVERITIES.map((sev) => ({
@@ -77,86 +89,92 @@ function buildDistribution(
 
 function buildKpis(
   events: LiveSecurityEvent[],
-  prevEvents: LiveSecurityEvent[],
+  prev:   LiveSecurityEvent[],
 ): SecurityMetric[] {
   const critCount     = events.filter((e) => e.severity === 'critical').length;
-  const prevCrit      = prevEvents.filter((e) => e.severity === 'critical').length;
+  const prevCrit      = prev.filter((e) => e.severity === 'critical').length;
   const openCount     = events.filter((e) => e.status === 'open').length;
-  const prevOpen      = prevEvents.filter((e) => e.status === 'open').length;
-
-  // OWASP score: starts at 64 (from Phase 1 mock) and slowly improves
-  // as resolved events accumulate — kept simple and stable.
+  const prevOpen      = prev.filter((e) => e.status === 'open').length;
   const resolvedCount = events.filter((e) => e.status === 'resolved').length;
   const owaspScore    = Math.min(99, 64 + Math.floor(resolvedCount / 5));
   const prevOwasp     = Math.min(99, 64 + Math.floor(
-    prevEvents.filter((e) => e.status === 'resolved').length / 5,
+    prev.filter((e) => e.status === 'resolved').length / 5,
   ));
 
   return [
     {
-      label:           'Total Security Events',
-      value:           events.length,
-      previousValue:   prevEvents.length,
-      trend:           events.length >= prevEvents.length ? 'up' : 'down',
-      trendIsPositive: false, // more events = worse
+      label: 'Total Security Events', value: events.length, previousValue: prev.length,
+      trend: events.length >= prev.length ? 'up' : 'down', trendIsPositive: false,
     },
     {
-      label:           'Critical Threats',
-      value:           critCount,
-      previousValue:   prevCrit,
-      trend:           critCount >= prevCrit ? 'up' : 'down',
-      trendIsPositive: false,
+      label: 'Critical Threats', value: critCount, previousValue: prevCrit,
+      trend: critCount >= prevCrit ? 'up' : 'down', trendIsPositive: false,
     },
     {
-      label:           'Open Vulnerabilities',
-      value:           openCount,
-      previousValue:   prevOpen,
-      trend:           openCount <= prevOpen ? 'down' : 'up',
-      trendIsPositive: openCount <= prevOpen, // fewer open = better
+      label: 'Open Vulnerabilities', value: openCount, previousValue: prevOpen,
+      trend: openCount <= prevOpen ? 'down' : 'up', trendIsPositive: openCount <= prevOpen,
     },
     {
-      label:           'OWASP Compliance',
-      value:           owaspScore,
-      previousValue:   prevOwasp,
-      unit:            '%',
-      trend:           owaspScore >= prevOwasp ? 'up' : 'down',
-      trendIsPositive: true,
+      label: 'OWASP Compliance', value: owaspScore, previousValue: prevOwasp,
+      unit: '%', trend: owaspScore >= prevOwasp ? 'up' : 'down', trendIsPositive: true,
     },
   ];
+}
+
+/** Count frequency of a string field and return top-N sorted descending */
+function topN(events: LiveSecurityEvent[], field: keyof LiveSecurityEvent, n = TOP_N): CountedItem[] {
+  const freq: Record<string, number> = {};
+  for (const e of events) {
+    const key = String(e[field]);
+    freq[key] = (freq[key] ?? 0) + 1;
+  }
+  return Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([label, count]) => ({ label, count }));
+}
+
+/** Count frequency of eventType, applying human-readable labels */
+function buildEventTypeCounts(events: LiveSecurityEvent[]): CountedItem[] {
+  const freq: Partial<Record<LiveEventType, number>> = {};
+  for (const e of events) {
+    freq[e.eventType] = (freq[e.eventType] ?? 0) + 1;
+  }
+  return (Object.entries(freq) as [LiveEventType, number][])
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, count]) => ({ label: EVENT_TYPE_LABELS[type], count }));
 }
 
 // ─── Public return type ───────────────────────────────────────────────────────
 
 export interface SecurityEventsState {
-  /** Raw live events, newest first, capped at MAX_EVENTS */
-  events:       LiveSecurityEvent[];
-  /** KPI metric objects ready for <KpiCard> */
-  kpis:         SecurityMetric[];
-  /** 30-day rolling trend data points for <EventTrendChart> */
-  trendData:    TrendDataPoint[];
-  /** Per-severity counts for <SeverityDonutChart> */
-  distribution: SeverityDistribution[];
-  /** Recent critical/high events formatted as alerts */
-  alertCount:   number;
-  /** WebSocket connection state */
-  wsStatus:     WsStatus;
-  /** Call to force a reconnect */
-  reconnect:    () => void;
+  events:           LiveSecurityEvent[];
+  kpis:             SecurityMetric[];
+  trendData:        TrendDataPoint[];
+  distribution:     SeverityDistribution[];
+  /** Attack / event-type frequency breakdown */
+  eventTypeCounts:  CountedItem[];
+  /** Most frequently targeted endpoints */
+  topEndpoints:     CountedItem[];
+  /** Most frequent source IPs */
+  topSources:       CountedItem[];
+  alertCount:       number;
+  wsStatus:         WsStatus;
+  reconnect:        () => void;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useSecurityEvents(): SecurityEventsState {
-  const [events, setEvents]           = useState<LiveSecurityEvent[]>([]);
-  const [trendData, setTrendData]     = useState<TrendDataPoint[]>([]);
-  const [kpis, setKpis]               = useState<SecurityMetric[]>(buildKpis([], []));
-  const [distribution, setDistribution] = useState<SeverityDistribution[]>(
-    buildDistribution([]),
-  );
-  const [alertCount, setAlertCount]   = useState(0);
+  const [events,          setEvents]          = useState<LiveSecurityEvent[]>([]);
+  const [trendData,       setTrendData]       = useState<TrendDataPoint[]>([]);
+  const [kpis,            setKpis]            = useState<SecurityMetric[]>(buildKpis([], []));
+  const [distribution,    setDistribution]    = useState<SeverityDistribution[]>(buildDistribution([]));
+  const [eventTypeCounts, setEventTypeCounts] = useState<CountedItem[]>([]);
+  const [topEndpoints,    setTopEndpoints]    = useState<CountedItem[]>([]);
+  const [topSources,      setTopSources]      = useState<CountedItem[]>([]);
+  const [alertCount,      setAlertCount]      = useState(0);
 
-  // We keep a ref snapshot of the previous event list for KPI delta calculations.
-  // Using a ref (not state) prevents double-renders.
   const prevEventsRef = useRef<LiveSecurityEvent[]>([]);
 
   const handleMessage = useCallback((raw: string) => {
@@ -164,52 +182,52 @@ export function useSecurityEvents(): SecurityEventsState {
     try {
       parsed = JSON.parse(raw) as { type: string; payload: unknown };
     } catch {
-      console.warn('[useSecurityEvents] Non-JSON message received:', raw.slice(0, 80));
+      console.warn('[useSecurityEvents] Non-JSON message:', raw.slice(0, 80));
       return;
     }
 
-    // Ignore ping frames — they're only for keep-alive
     if (parsed.type === 'ping') return;
     if (parsed.type !== 'security_event') return;
 
     const incoming = parsed.payload as LiveSecurityEvent;
 
     setEvents((prev) => {
-      // Prepend newest event; trim to cap
       const next = [incoming, ...prev].slice(0, MAX_EVENTS);
 
-      // ── Trend data ──────────────────────────────────────────────────────
+      // ── Trend ──────────────────────────────────────────────────────────────
       const today = todayKey();
-      setTrendData((prevTrend) => {
-        const last = prevTrend[prevTrend.length - 1];
+      setTrendData((pt) => {
+        const last = pt[pt.length - 1];
         if (last && last.date === today) {
-          // Increment today's bucket
           const updated = { ...last, [incoming.severity]: last[incoming.severity] + 1 };
-          return [...prevTrend.slice(0, -1), updated];
+          return [...pt.slice(0, -1), updated];
         }
-        // New day — append a fresh data point
         const fresh: TrendDataPoint = { date: today, ...emptyTotals() };
         fresh[incoming.severity]++;
-        // Keep only the last 30 days
-        return [...prevTrend, fresh].slice(-30);
+        return [...pt, fresh].slice(-30);
       });
 
-      // ── KPIs ────────────────────────────────────────────────────────────
+      // ── KPIs ───────────────────────────────────────────────────────────────
       setKpis(buildKpis(next, prevEventsRef.current));
 
-      // ── Distribution ────────────────────────────────────────────────────
+      // ── Distribution ───────────────────────────────────────────────────────
       setDistribution(buildDistribution(next));
 
-      // ── Alert count ─────────────────────────────────────────────────────
-      const critHighCount = next.filter(
+      // ── Analytics ──────────────────────────────────────────────────────────
+      // Throttle to every 5 events to avoid thrashing on high-frequency streams
+      if (next.length % 5 === 0 || next.length <= 5) {
+        setEventTypeCounts(buildEventTypeCounts(next));
+        setTopEndpoints(topN(next, 'endpoint'));
+        setTopSources(topN(next, 'source'));
+      }
+
+      // ── Alert count ────────────────────────────────────────────────────────
+      const critHigh = next.filter(
         (e) => (e.severity === 'critical' || e.severity === 'high') && e.status === 'open',
       ).length;
-      setAlertCount(Math.min(critHighCount, MAX_ALERTS));
+      setAlertCount(Math.min(critHigh, MAX_ALERTS));
 
-      // Snapshot for next delta calculation (every 10 events)
-      if (next.length % 10 === 0) {
-        prevEventsRef.current = next;
-      }
+      if (next.length % 10 === 0) prevEventsRef.current = next;
 
       return next;
     });
@@ -218,12 +236,8 @@ export function useSecurityEvents(): SecurityEventsState {
   const { status: wsStatus, reconnect } = useWebSocket({ onMessage: handleMessage });
 
   return {
-    events,
-    kpis,
-    trendData,
-    distribution,
-    alertCount,
-    wsStatus,
-    reconnect,
+    events, kpis, trendData, distribution,
+    eventTypeCounts, topEndpoints, topSources,
+    alertCount, wsStatus, reconnect,
   };
 }
